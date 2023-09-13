@@ -3,6 +3,7 @@ import numpy as np
 
 class YB_60:
     memory = []
+    program_counter = 0
 
     def __init__(self):
         self.memory = np.zeros(1048576)
@@ -14,6 +15,8 @@ class YB_60:
             return 1
         if ':' in user_input:
             return 2
+        if 'R' in user_input:
+            return 3
         return -1
 
     def display_mem_address(self, address):
@@ -67,6 +70,10 @@ class YB_60:
         return
 
     def run_program(self, address):
+        split = address.split('R')
+        self.program_counter = int(split[0], 16)
+        print('  PC        ' + 'OPC    ' + 'INST    ' + 'Rd    ' + 'Rs1    ' + 'Rs2')
+        print(format(self.program_counter, 'x').upper().zfill(5))
         return
 
 
