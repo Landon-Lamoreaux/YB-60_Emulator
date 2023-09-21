@@ -1,4 +1,6 @@
 import numpy as np
+import sys
+import re
 
 
 class YB_60:
@@ -18,6 +20,30 @@ class YB_60:
         if 'R' in user_input:
             return 3
         return -1
+
+    def read_in_file(self, file_data):
+        file = open(file_data)
+        data_string = file.read()
+        data_string = data_string.split(':')
+        offset = 0
+
+        for i in range(1, len(data_string)):
+            data = re.findall('..', data_string[i])
+            if data[3] == '02':
+                offset = int(data[4] + data[5], 16) * 16
+                continue
+            count = 0
+
+            for j in data[4:4+int(data[0], 16)]:
+                if int(data[1]+data[2], 16) + count > self.memory.size:
+                    print("Error: Memory is full, not all data was loaded from file.")
+                    break
+
+                self.memory[int(data[1]+data[2], 16) + count + offset] = int(j, 16)
+                count = count + 1
+
+        file.close()
+        return
 
     def display_mem_address(self, address):
         # Printing out the data in hex at the given address if it is a valid address.
@@ -80,6 +106,9 @@ class YB_60:
 if __name__ == '__main__':
 
     YB = YB_60()
+
+    if len(sys.argv) == 2:
+        YB.read_in_file(sys.argv[1])
 
     print('>', end=' ')
     strInput = str(input())
