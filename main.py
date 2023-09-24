@@ -11,7 +11,7 @@ class YB_60:
         self.memory = np.zeros(1048576)
 
     def parse_input(self, user_input):
-        if user_input.isnumeric():
+        if user_input.isalnum() and not ('R' in user_input):
             return 0
         if '.' in user_input:
             return 1
@@ -45,7 +45,13 @@ class YB_60:
         file.close()
         return
 
-    def display_mem_address(self, address):
+    def display_mem_address(self, straddress):
+        try:
+            address = int(straddress, 16)
+        except:
+            print('Error, not a hexedecimal number.')
+            return
+
         # Printing out the data in hex at the given address if it is a valid address.
         if self.memory.size > address >= 0:
             a = format(int(self.memory[address]), 'x')
@@ -57,30 +63,37 @@ class YB_60:
     def display_range_mem_address(self, addresses):
         nums = addresses.split('.')
 
+        try:
+            start_add = int(nums[0], 16)
+            end_add = int(nums[1], 16)
+        except:
+            print('Addresses provided are not in hexadecimal.')
+            return
+
         # Checking if the range is valid.
-        if int(nums[0], 16) >= int(nums[1], 16):
+        if start_add >= end_add:
             print("Invalid Memory Access, memory locations are not sequential.")
             return
 
         # Checking if each memory address is valid.
-        if not (self.memory.size > int(nums[0], 16) >= 0) or not (self.memory.size > int(nums[1], 16) >= 0):
+        if not (self.memory.size > start_add >= 0) or not (self.memory.size > end_add >= 0):
             print("Invalid Memory Address.")
             return
 
         # Printing out all the data in the provided memory range.
-        i = int(nums[0], 16)
+        i = start_add
         print(format(i, 'x').upper(), end='    ')
-        while i < int(nums[1], 16):
+        while i < end_add:
             a = format(int(self.memory[i]), 'x')
             print(a.upper().zfill(2), end=' ')
             i = i + 1
-            if (i - int(nums[0], 16)) % 8 == 0:
+            if (i - start_add) % 8 == 0:
                 print()
-                if (int(nums[1], 16) - i) != 0:
+                if (end_add - i) != 0:
                     print(format(i, 'x').upper(), end='    ')
 
         # Printing a new line if the range was a multiple of 8.
-        if (i - int(nums[0], 16)) % 8 != 0:
+        if (i - start_add) % 8 != 0:
             print()
         return
 
@@ -88,7 +101,12 @@ class YB_60:
         strs = input.split(':')
         data = strs[1].split(' ')
 
-        j = int(strs[0], 16)
+        try:
+            j = int(strs[0], 16)
+        except:
+            print('Error: Address provided is not a hexadecimal number.')
+            return
+
         for i in data[1:]:
             self.memory[j] = int(i, 16)
             j = j + 1
@@ -97,7 +115,11 @@ class YB_60:
 
     def run_program(self, address):
         split = address.split('R')
-        self.program_counter = int(split[0], 16)
+        try:
+            self.program_counter = int(split[0], 16)
+        except:
+            print('Error: Address provided is not a hexadecimal number.')
+            return
         print('  PC        ' + 'OPC    ' + 'INST    ' + 'Rd    ' + 'Rs1    ' + 'Rs2')
         print(format(self.program_counter, 'x').upper().zfill(5))
         return
@@ -110,17 +132,18 @@ if __name__ == '__main__':
     if len(sys.argv) == 2:
         YB.read_in_file(sys.argv[1])
 
-    print('>', end=' ')
-    strInput = str(input())
-    while strInput != 'exit':
+    strInput = str(input('>'))
+    while strInput != 'exit' and strInput != '\04':
         match YB.parse_input(strInput):
             case 0:
-                YB.display_mem_address(int(strInput))
+                YB.display_mem_address(strInput)
             case 1:
                 YB.display_range_mem_address(strInput)
             case 2:
                 YB.edit_mem_address(strInput)
             case 3:
                 YB.run_program(strInput)
-        print('>', end=' ')
-        strInput = str(input())
+            case default:
+                print('Not a valid command, try again.', strInput)
+
+        strInput = str(input('>'))
