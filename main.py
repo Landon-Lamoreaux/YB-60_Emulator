@@ -26,6 +26,7 @@ class YB_60:
         data_string = file.read()
         data_string = data_string.split(':')
         offset = 0
+        checksum = 0;
 
         for i in range(1, len(data_string)):
             data = re.findall('..', data_string[i])
@@ -41,6 +42,23 @@ class YB_60:
 
                 self.memory[int(data[1]+data[2], 16) + count + offset] = int(j, 16)
                 count = count + 1
+
+            sum = 0
+            for j in data:
+                byte = int(j, 16)
+                if byte > 127:
+                    byte = -128 + (byte & 0x7F)
+                sum = sum + byte
+                sum = sum & 0x7F
+            # Find the checksum using 2s compliment
+            # int_checksum = ((sum ^ 0xFF) + 1) & 0xFF
+            # num = 256 - sum % 256
+
+            checksum = int(data[len(data) - 1], 16)
+            if sum != 0:
+                print("Format input error. ", sys.argv[1])
+                exit(-1)
+
 
         file.close()
         return
