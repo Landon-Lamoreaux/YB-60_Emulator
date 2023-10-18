@@ -6,12 +6,14 @@ import re
 class YB_60:
     memory = []
     program_counter = 0
+    registers = []
 
     def __init__(self):
         self.memory = np.zeros(1048576)
+        self.registers = np.zeros(32)
 
     def parse_input(self, user_input):
-        if user_input.isalnum() and not ('R' in user_input):
+        if user_input.isalnum() and not ('R' in user_input) and not ('t' in user_input) and not ('info' == user_input):
             return 0
         if '.' in user_input:
             return 1
@@ -19,6 +21,10 @@ class YB_60:
             return 2
         if 'R' in user_input:
             return 3
+        if 't' in user_input:
+            return 4
+        if 'info' == user_input:
+            return 5
         return -1
 
     def read_in_file(self, file_data):
@@ -50,15 +56,11 @@ class YB_60:
                     byte = -128 + (byte & 0x7F)
                 sum = sum + byte
                 sum = sum & 0x7F
-            # Find the checksum using 2s compliment
-            # int_checksum = ((sum ^ 0xFF) + 1) & 0xFF
-            # num = 256 - sum % 256
 
             checksum = int(data[len(data) - 1], 16)
             if sum != 0:
                 print("Format input error. ", sys.argv[1])
                 exit(-1)
-
 
         file.close()
         return
@@ -142,6 +144,17 @@ class YB_60:
         print(format(self.program_counter, 'x').upper().zfill(5))
         return
 
+    def display_info(self):
+        count = 0
+        for i in self.registers:
+            print(f"{'x' + str(count) : >3}" + ' ' + str(int(i)).zfill(8))
+            count += 1
+        return
+
+
+    def disassemble(self):
+        return
+
 
 if __name__ == '__main__':
 
@@ -161,6 +174,10 @@ if __name__ == '__main__':
                 YB.edit_mem_address(strInput)
             case 3:
                 YB.run_program(strInput)
+            case 4:
+                YB.disassemble()
+            case 5:
+                YB.display_info()
             case default:
                 print('Not a valid command, try again.', strInput)
 
