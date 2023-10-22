@@ -1,6 +1,7 @@
 import numpy as np
 import sys
 import re
+from bitstring import BitArray
 
 
 class YB_60:
@@ -160,18 +161,18 @@ class YB_60:
             return
 
         pc = address
-        instruction = bytearray.fromhex(
-            format(int(self.memory[pc + 3]), 'x') + format(int(self.memory[pc + 2]), 'x') +
-            format(int(self.memory[pc + 1]), 'x') + format(int(self.memory[pc]), 'x'))
+        #instruction = bytearray.fromhex(
+        #    format(int(self.memory[pc + 3]), 'x') + format(int(self.memory[pc + 2]), 'x') +
+        #    format(int(self.memory[pc + 1]), 'x') + format(int(self.memory[pc]), 'x'))
 
         instruction = (format(int(self.memory[pc + 3]), "08b") + format(int(self.memory[pc + 2]), "08b") +
                        format(int(self.memory[pc + 1]), "08b") + format(int(self.memory[pc]), "08b"))
 
         while format(int(instruction, 2), 'x') != '100073':
             pc += 4
-            opcode, rd, funct3, rs1, rs2, funct7, imm = self.parse_instruction(instruction)
-            name = lookup_instruction(opcode, funct3, funct7)
-            print('\t' + name + ' x' + str(int(rd, 2)) + ', x' + str(int(rs1, 2)) + ', x' + str(int(rs2, 2)))
+            opcode, rd, funct3, rs1, rs2, funct7, imm, instr_format = self.parse_instruction(instruction)
+            name = lookup_instruction(opcode, funct3, funct7, imm)
+            print_instruction(opcode, name, str(int(rd, 2)), str(int(rs1, 2)), str(int(rs2, 2)), imm, instr_format)
             instruction = (format(int(self.memory[pc + 3]), "08b") + format(int(self.memory[pc + 2]), "08b") +
                            format(int(self.memory[pc + 1]), "08b") + format(int(self.memory[pc]), "08b"))
             if format(int(instruction, 2), 'x') == '100073':
@@ -181,59 +182,139 @@ class YB_60:
 # 300: B3 02 5A 01 33 03 5B 01 B3 89 62 40 73 00 10 00
 
     def parse_instruction(self, data):
-        op = int(data[25:30], 2)
+        op = int(data[25:32], 2)
         opcode = data[25:32]
-        imm = np.zeros(32)
+        imm = np.zeros(32, dtype=int)
         formats = ''
-        rd, funct3, rs1, rs2, funct7 = bytearray(0), bytearray(0), bytearray(0), bytearray(0), bytearray(0)
+        rd, funct3, rs1, rs2, funct7 = '0', '0', '0', '0', '0'
 
-        if op == 4 or op == 12:     # R Format.
+        if op == 51:     # R Format.
             formats = 'R'
             funct7 = data[0:7]
-        elif op == 0 or op == 25:   # I Format.
+        elif op == 3 or op == 15 or op == 19 or op == 103 or op == 115:   # I Format.
             formats = 'I'
-            imm[0:11] = data[0:12]
-        elif op == 8:               # S Format.
+            imm = copy_vals(imm, data[0:12], 0)
+        elif op == 35:               # S Format.
             formats = 'S'
-            imm[5:11] = data[0:7]
-            imm[0:4] = data[20:25]
-        elif op == 24:              # SB Format.
+            imm = copy_vals2(imm, data[0:7], 11)
+            imm = copy_vals2(imm, data[20:25], 4)
+        elif op == 99:              # SB Format.
             formats = 'SB'
-            imm[4:(1 | 11)] = data[20:25]
-            imm[(12 | 10):5] = data[0:7]
-        elif op == 5 or op == 13:   # U Format.
+            imm = copy_vals(imm, data[20:24], 1)
+            imm[11] = data[24]
+            imm[12] = data[0]
+            imm = copy_vals2(imm, data[1:7], 10)
+        elif op == 23 or op == 55:   # U Format.
             formats = 'U'
-            imm[12:32] = data[0:20]
-        elif op == 27:              # UJ Format.
+            imm = copy_vals(imm, data[0:20], 12)
+        elif op == 111:              # UJ Format.
             formats = 'UJ'
-            imm[(20 | 10):(1 | 11 | 19):12] = data[0:20]
+            imm[20] = int(data[0])
+            imm = copy_vals(imm, data[1:11], 1)
+            imm[11] = int(data[11])
+            imm = copy_vals(imm, data[12:20], 12)
 
-        if formats == 'R' or 'I' or 'U' or 'UJ':
+        if formats == 'R' or formats == 'I' or formats == 'U' or formats == 'UJ':
             rd = data[20:25]
 
-        if formats == 'R' or 'I' or 'S' or 'SB':
+        if formats == 'R' or formats == 'I' or formats == 'S' or formats == 'SB':
             funct3 = data[17:20]
             rs1 = data[12:17]
 
-        if formats == 'R' or 'S' or 'SB':
+        if formats == 'R' or formats == 'S' or formats == 'SB':
             rs2 = data[7:12]
 
-        return opcode, rd, funct3, rs1, rs2, funct7, imm
+        return opcode, rd, funct3, rs1, rs2, funct7, imm, formats
 
 
-def lookup_instruction(op, fun3, fun7):
-    opcode = format(int(op, 2), 'x')
-    funct3 = format(int(fun3, 2), 'x')
-    funct7 = format(int(fun7, 2), 'x')
+def copy_vals(imm, data, j):
+    for i in data:
+        imm[j] = i
+        j += 1
+    return imm
 
-    r_instr = ['add', 'sll', 'slt', 'sltu', 'xor', 'srl', 'or', 'and']
+def copy_vals2(imm, data, j):
+    for i in data:
+        imm[j] = i
+        j -= 1
+    return imm
 
-    if opcode == '33':
-        if funct3 == '0' and funct7 == '20':
-            return 'sub'
-        if funct3 == '5' and funct7 == '20':
-            return 'sra'
-        return r_instr[int(funct3, 16)]
+
+def lookup_instruction(op, fun3, fun7, imm):
+    try:
+        opcode = format(int(op, 2), 'x')
+        funct3 = int(fun3, 2)
+        funct7 = format(int(fun7, 2), 'x')
+    except:
+        funct7 = '0'
+    finally:
+
+        r_instr = ['add', 'sll', 'slt', 'sltu', 'xor', 'srl', 'or', 'and']
+        i_instr1 = ['addi', 'slli', 'slti', 'sltiu', 'xori', 'srli', 'ori', 'andi']
+        i_instr2 = ['ecall', 'csrrw', 'csrrs', 'csrrc', 'csrrwi', 'csrrsi', 'csrrci']
+        i_instr3 = ['lb', 'lh', 'lw', 'lbu', 'lhu']
+        i_instr4 = ['fence', 'fence.i']
+        sb_instr = ['beq', 'bne', '', '', 'blt', 'bge', 'bltu', 'bgeu']
+        s_instr = ['sb', 'sh', 'sw']
+
+        match opcode:
+            case '33':
+                if funct3 == '0' and funct7 == '20':
+                    return 'sub'
+                if funct3 == '5' and funct7 == '20':
+                    return 'sra'
+                return r_instr[funct3]
+            case '13':
+                if funct3 == '5' and format(int(imm[5:11], 2), 'x') == '20':
+                    return 'srai'
+                return i_instr1[funct3]
+            case '73':
+                return i_instr2[funct3]
+            case '3':
+                return i_instr3[funct3]
+            case '0F':
+                return i_instr4[funct3]
+            case '63':
+                return sb_instr[funct3]
+            case '23':
+                return s_instr[funct3]
+            case '67':
+                return 'jalr'
+            case '6f':
+                return 'jal'
+            case '37':
+                return 'lui'
+            case '17':
+                return 'auipc'
+
+    return 'Instruction Not Supported'
+
+
+def print_instruction(opcode, name, rd, rs1, rs2, imm, instr_format):
+    name = format(name, '>6')
+    if name != 'Instruction Not Supported':
+        print(name + ' x', end="")
+    match instr_format:
+        case 'R':
+            print(rd + ', x' + rs1 + ', x' + rs2)
+        case 'I':
+            if opcode == '0000011' or opcode == '1100111':
+                print(rd + ', ' + str(int(''.join([str(i) for i in imm[0:12]]), 2)) + '(x' + rs1 + ')')
+            else:
+                print(rd + ', x' + rs1 + ', ' + str(int(''.join([str(i) for i in imm[0:12]]), 2)))
+        case 'S':
+            imm_num = BitArray(bin=''.join([str(i) for i in imm[0:12]])[::-1])
+            print(rs2 + ', ' + str(imm_num.uint) + '(x' + rs1 + ')')
+        case 'UJ':
+            imm_num = BitArray(bin=''.join([str(i) for i in imm[1:21]])[::-1])
+            print(rd + ', ' + str(imm_num.int))
+        case 'U':
+            imm_num = BitArray(bin=''.join([str(i) for i in imm[12:32]]))
+            print(rd + ', ' + str(imm_num.int))
+        case 'SB':
+            imm_num = BitArray(bin=''.join([str(i) for i in imm[0:13]])[::-1])
+            print(rs1 + ', x' + rs2 + ', ' + str(imm_num.int))
+    return
 
 
 if __name__ == '__main__':
