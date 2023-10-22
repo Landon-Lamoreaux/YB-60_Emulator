@@ -141,8 +141,48 @@ class YB_60:
         except:
             print('Error: Address provided is not a hexadecimal number.')
             return
-        print('  PC        ' + 'OPC    ' + 'INST    ' + 'rd    ' + 'rs1    ' + 'rs2/imm')
-        print(format(self.program_counter, 'x').upper().zfill(5))
+
+        pc = self.program_counter
+
+        instruction = (format(int(self.memory[pc + 3]), "08b") + format(int(self.memory[pc + 2]), "08b") +
+                       format(int(self.memory[pc + 1]), "08b") + format(int(self.memory[pc]), "08b"))
+
+        print(format('PC', '>5') + format('OPC', '>9') + format('INST', '>7') + '  rd  ' + '  rs1  ' + 'rs2/imm')
+        while format(int(instruction, 2), 'x') != '100073':
+            imm_str = ''
+            print(format(pc, 'x').upper().zfill(5) + format(format(int(instruction, 2), 'x').upper().zfill(8), '>9'), end='')
+            opcode, rd, funct3, rs1, rs2, funct7, imm, instr_format = self.parse_instruction(instruction)
+            name = lookup_instruction(opcode, funct3, funct7, imm)
+            print(format(name.upper(), '>7'), end='')
+            if rd != '0':
+                print(format(str(rd), '>6'), end='')
+            else:
+                print('      ', end='')
+
+            if rs1 != '0':
+                print(format(str(rs1), '>6'), end='')
+            else:
+                print('      ', end='')
+
+            if rs2 != '0':
+                print(' ' + format(str(rs2), '<5'), end='')
+            if instr_format == 'I' or instr_format =='S':
+                imm_str = ''.join([str(i) for i in imm[0:12]])
+            elif instr_format == 'SB':
+                imm_str = ''.join([str(i) for i in imm[1:13]])
+            elif instr_format == 'U':
+                imm_str = ''.join([str(i) for i in imm[12:32]])
+            elif instr_format == 'UJ':
+                imm_str = ''.join([str(i) for i in imm[1:21]])
+            if instr_format == 'S' or instr_format == 'UJ' or instr_format == 'SB':
+                imm_str = imm_str[::-1]
+            print(' ' + imm_str, end='')
+            pc += 4
+            instruction = (format(int(self.memory[pc + 3]), "08b") + format(int(self.memory[pc + 2]), "08b") +
+                           format(int(self.memory[pc + 1]), "08b") + format(int(self.memory[pc]), "08b"))
+            print('')
+            if format(int(instruction, 2), 'x') == '100073':
+                print(format(pc, 'x').upper().zfill(5) + format(format(int(instruction, 2), 'x').upper().zfill(8), '>9') + ' EBREAK')
         return
 
     def display_info(self):
@@ -245,8 +285,6 @@ def lookup_instruction(op, fun3, fun7, imm):
         opcode = format(int(op, 2), 'x')
         funct3 = int(fun3, 2)
         funct7 = format(int(fun7, 2), 'x')
-    except:
-        funct7 = '0'
     finally:
 
         r_instr = ['add', 'sll', 'slt', 'sltu', 'xor', 'srl', 'or', 'and']
@@ -259,9 +297,9 @@ def lookup_instruction(op, fun3, fun7, imm):
 
         match opcode:
             case '33':
-                if funct3 == '0' and funct7 == '20':
+                if format(funct3, 'x') == '0' and funct7 == '20':
                     return 'sub'
-                if funct3 == '5' and funct7 == '20':
+                if format(funct3, 'x') == '5' and funct7 == '20':
                     return 'sra'
                 return r_instr[funct3]
             case '13':
