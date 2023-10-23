@@ -128,6 +128,7 @@ class YB_60:
             print('Error: Address provided is not a hexadecimal number.')
             return
 
+        # Updating the memory from the starting location with the data given.
         for i in data[1:]:
             self.memory[j] = int(i, 16)
             j = j + 1
@@ -144,26 +145,38 @@ class YB_60:
 
         pc = self.program_counter
 
+        # Grabbing the instruction from memory.
         instruction = (format(int(self.memory[pc + 3]), "08b") + format(int(self.memory[pc + 2]), "08b") +
                        format(int(self.memory[pc + 1]), "08b") + format(int(self.memory[pc]), "08b"))
 
+        # Printing out the header.
         print(format('PC', '>5') + format('OPC', '>9') + format('INST', '>7') + '  rd  ' + '  rs1  ' + 'rs2/imm')
+
+        # Reading through and printing out all the instructions from the given address to the terminator.
         while format(int(instruction, 2), 'x') != '100073':
             imm_str = ''
+
+            # Printing out the program counter and the instruction in hexadecimal.
             print(format(pc, 'x').upper().zfill(5) + format(format(int(instruction, 2), 'x').upper().zfill(8), '>9'), end='')
+
+            # Parsing the instruction and determining the name of the instruction.
             opcode, rd, funct3, rs1, rs2, funct7, imm, instr_format = self.parse_instruction(instruction)
             name = lookup_instruction(opcode, funct3, funct7, imm)
             print(format(name.upper(), '>7'), end='')
+
+            # Printing out the rd value if there is a rd in the instruction.
             if rd != '0':
                 print(format(str(rd), '>6'), end='')
             else:
                 print('      ', end='')
 
+            # Printing out the rs1 value if there is a rs1 in the instruction.
             if rs1 != '0':
                 print(format(str(rs1), '>6'), end='')
             else:
                 print('      ', end='')
 
+            # Printing out the rs2 and or immediate register.
             if rs2 != '0':
                 print(' ' + format(str(rs2), '<5'), end='')
             if instr_format == 'I' or instr_format =='S':
@@ -177,16 +190,23 @@ class YB_60:
             if instr_format == 'S' or instr_format == 'UJ' or instr_format == 'SB':
                 imm_str = imm_str[::-1]
             print(' ' + imm_str, end='')
-            pc += 4
+
+            pc += 4  # Updating the program counter.
+
+            # Grabbing the instruction from memory.
             instruction = (format(int(self.memory[pc + 3]), "08b") + format(int(self.memory[pc + 2]), "08b") +
                            format(int(self.memory[pc + 1]), "08b") + format(int(self.memory[pc]), "08b"))
-            print('')
+
+            print('')  # Printing out a new line.
+
+            # Printing out 'EBREAK' if that is the next instruction.
             if format(int(instruction, 2), 'x') == '100073':
                 print(format(pc, 'x').upper().zfill(5) + format(format(int(instruction, 2), 'x').upper().zfill(8), '>9') + ' EBREAK')
         return
 
     def display_info(self):
         count = 0
+        # Printing out the contents of all 32 registers.
         for i in self.registers:
             print(f"{'x' + str(count) : >3}" + ' ' + str(int(i)).zfill(8))
             count += 1
@@ -200,34 +220,41 @@ class YB_60:
             print('Error: Address provided is not a hexadecimal number.')
             return
 
-        pc = address
-        #instruction = bytearray.fromhex(
-        #    format(int(self.memory[pc + 3]), 'x') + format(int(self.memory[pc + 2]), 'x') +
-        #    format(int(self.memory[pc + 1]), 'x') + format(int(self.memory[pc]), 'x'))
+        pc = address  # Setting the program counter
 
+        # Grabbing the first instruction from memory.
         instruction = (format(int(self.memory[pc + 3]), "08b") + format(int(self.memory[pc + 2]), "08b") +
                        format(int(self.memory[pc + 1]), "08b") + format(int(self.memory[pc]), "08b"))
 
         while format(int(instruction, 2), 'x') != '100073':
             pc += 4
+
+            # Parsing the instruction and determining the instructions name.
             opcode, rd, funct3, rs1, rs2, funct7, imm, instr_format = self.parse_instruction(instruction)
             name = lookup_instruction(opcode, funct3, funct7, imm)
+
+            # Printing out the instruction and all the following values.
             print_instruction(opcode, name, str(int(rd, 2)), str(int(rs1, 2)), str(int(rs2, 2)), imm, instr_format)
+
+            # Grabbing the next instruction from memory.
             instruction = (format(int(self.memory[pc + 3]), "08b") + format(int(self.memory[pc + 2]), "08b") +
                            format(int(self.memory[pc + 1]), "08b") + format(int(self.memory[pc]), "08b"))
+
+            # Printing out the termination statement if the instruction is the terminator.
             if format(int(instruction, 2), 'x') == '100073':
                 print('ebreak')
         return
 
-# 300: B3 02 5A 01 33 03 5B 01 B3 89 62 40 73 00 10 00
 
     def parse_instruction(self, data):
+        # Setting up our variables.
         op = int(data[25:32], 2)
         opcode = data[25:32]
         imm = np.zeros(32, dtype=int)
         formats = ''
         rd, funct3, rs1, rs2, funct7 = '0', '0', '0', '0', '0'
 
+        # Parsing the instruction into its parts and determining what type it is.
         if op == 51:     # R Format.
             formats = 'R'
             funct7 = data[0:7]
@@ -254,6 +281,7 @@ class YB_60:
             imm[11] = int(data[11])
             imm = copy_vals(imm, data[12:20], 12)
 
+        # Splitting up the instruction into its parts for these instruction formats.
         if formats == 'R' or formats == 'I' or formats == 'U' or formats == 'UJ':
             rd = data[20:25]
 
@@ -264,15 +292,19 @@ class YB_60:
         if formats == 'R' or formats == 'S' or formats == 'SB':
             rs2 = data[7:12]
 
+        # Returning the instruction split into its different components.
         return opcode, rd, funct3, rs1, rs2, funct7, imm, formats
 
 
+# Copies data into imm starting at j and incrementing.
 def copy_vals(imm, data, j):
     for i in data:
         imm[j] = i
         j += 1
     return imm
 
+
+# Copies data into imm starting at j and decrementing.
 def copy_vals2(imm, data, j):
     for i in data:
         imm[j] = i
@@ -280,6 +312,7 @@ def copy_vals2(imm, data, j):
     return imm
 
 
+# Finding what the instruction is based on its opcode, funct3, and func7 bits.
 def lookup_instruction(op, fun3, fun7, imm):
     try:
         opcode = format(int(op, 2), 'x')
@@ -295,6 +328,7 @@ def lookup_instruction(op, fun3, fun7, imm):
         sb_instr = ['beq', 'bne', '', '', 'blt', 'bge', 'bltu', 'bgeu']
         s_instr = ['sb', 'sh', 'sw']
 
+        # Looking up what instruction it is.
         match opcode:
             case '33':
                 if format(funct3, 'x') == '0' and funct7 == '20':
@@ -325,13 +359,17 @@ def lookup_instruction(op, fun3, fun7, imm):
             case '17':
                 return 'auipc'
 
+    # If no instruction was found we return this.
     return 'Instruction Not Supported'
 
 
+# Printing out the RISC-V instruction that we disassembled.
 def print_instruction(opcode, name, rd, rs1, rs2, imm, instr_format):
     name = format(name, '>6')
     if name != 'Instruction Not Supported':
         print(name + ' x', end="")
+
+    # Printing out the instruction based on what type of instruction it is.
     match instr_format:
         case 'R':
             print(rd + ', x' + rs1 + ', x' + rs2)
@@ -364,6 +402,8 @@ if __name__ == '__main__':
 
     strInput = str(input('>'))
     while strInput != 'exit' and strInput != '\04':
+
+        # Determining what to do with the users input.
         match YB.parse_input(strInput):
             case 0:
                 YB.display_mem_address(strInput)
