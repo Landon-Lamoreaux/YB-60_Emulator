@@ -7,10 +7,11 @@ from bitstring import BitArray
 class YB_60:
     memory = []
     registers = []
+    pc = 0
 
     def __init__(self):
-        self.memory = np.zeros(1048576)
-        self.registers = np.zeros(32)
+        self.memory = np.zeros(1048576, dtype=int)
+        self.registers = np.zeros(32, dtype=int)
 
     def read_in_file(self, file):
         data_string = file.read()
@@ -90,7 +91,8 @@ class YB_60:
 
     def run_program(self, address):
         split = address.split('r')
-        pc = int(split[0], 16)
+        self.pc = int(split[0], 16)
+        self.registers = np.zeros(32, dtype=int)
         instruction = '0'
 
         # Printing out the header.
@@ -99,11 +101,11 @@ class YB_60:
         # Reading through and printing out all the instructions from the given address to the terminator.
         while format(int(instruction, 2), 'x') != '100073':
             # Grabbing the instruction from memory.
-            instruction = (format(int(self.memory[pc + 3]), "08b") + format(int(self.memory[pc + 2]), "08b") +
-                           format(int(self.memory[pc + 1]), "08b") + format(int(self.memory[pc]), "08b"))
+            instruction = (format(int(self.memory[self.pc + 3]), "08b") + format(int(self.memory[self.pc + 2]), "08b") +
+                           format(int(self.memory[self.pc + 1]), "08b") + format(int(self.memory[self.pc]), "08b"))
 
             # Printing out the program counter and the instruction in hexadecimal.
-            print(format(pc, 'x').upper().zfill(5) + format(format(int(instruction, 2), 'x').upper().zfill(8), '>9'), end='')
+            print(format(self.pc, 'x').upper().zfill(5) + format(format(int(instruction, 2), 'x').upper().zfill(8), '>9'), end='')
 
             # Printing out 'EBREAK' if that is the next instruction.
             if format(int(instruction, 2), 'x') == '100073':
@@ -114,6 +116,9 @@ class YB_60:
             opcode, rd, funct3, rs1, rs2, funct7, imm, instr_format = self.parse_instruction(instruction)
             name = lookup_instruction(opcode, funct3, funct7, imm)
 
+            # Running the instruction.
+            self.run_line(name, imm, rd, rs1, rs2)
+
             # Printing out the name then the rd value if there is a rd in the instruction.
             print(format(name.upper(), '>7') + (format(str(rd), '>6') if rd != '0' else '      '), end='')
 
@@ -121,19 +126,20 @@ class YB_60:
             print(format(str(rs1), '>6') if rs1 != '0' else '      ', end='')
 
             # Printing out the rs2 and or immediate register.
-            print((' ' + format(str(rs2), '<5') if rs2 != '0' else '') + ' ' + get_immstr(instr_format, imm))
-            pc += 4  # Updating the program counter.
+            print((' ' + format(str(rs2), '<5') if rs2 != '0' else '') + ' ' + format(imm, 'b').zfill(5))
+            self.pc += 4  # Updating the program counter.
         return
 
     def display_info(self):
         # Printing out the contents of all 32 registers.
         for i in range(0, 32):
-            print(f"{'x' + str(i) : >3}" + ' ' + str(int(self.registers[i])).zfill(8))
+            print(f"{'x' + str(i) : >3}" + ' ' + format(self.registers[i] & 0xFFFFFFFF, 'x').upper().zfill(8))
         return
 
     def disassemble(self, data):
         split = data.split('t')
         pc = int(split[0], 16)  # Setting the program counter
+        self.registers = np.zeros(32, dtype=int)
         instruction = '0'
 
         while format(int(instruction, 2), 'x') != '100073':
@@ -152,7 +158,11 @@ class YB_60:
             name = lookup_instruction(opcode, funct3, funct7, imm)
 
             # Printing out the instruction and all the following values.
-            print_instruction(opcode, name, str(int(rd, 2)), str(int(rs1, 2)), str(int(rs2, 2)), imm, instr_format)
+            print_instruction(opcode, name, str(int(rd, 2)), str(int(rs1, 2)), str(int(rs2, 2)), imm, instr_format, int(instruction, 2))
+
+            # Running the instruction.
+            self.run_line(name, sign_imm(imm, instr_format), rd, rs1, rs2)
+
             pc += 4
         return
 
@@ -161,8 +171,9 @@ class YB_60:
         # Setting up our variables.
         op = int(data[25:32], 2)
         opcode = data[25:32]
-        imm = np.zeros(32, dtype=int)
+        imm = 0
         rd, funct3, rs1, rs2, funct7, formats = '0', '0', '0', '0', '0', ''
+        instr = BitArray(bin=data).int
 
         # Parsing the instruction into its parts and determining what type it is.
         if op == 51:     # R Format.
@@ -170,24 +181,36 @@ class YB_60:
             funct7 = data[0:7]
         elif op == 3 or op == 15 or op == 19 or op == 103 or op == 115:   # I Format.
             formats = 'I'
-            imm = copy_vals(imm, data[0:12], 0, 1)
+            # imm = copy_vals(imm, data[0:12], 0, 1)
+            imm = (instr & int("FFF00000", 16)) >> 20  # Bit [11:0]
         elif op == 35:               # S Format.
             formats = 'S'
-            imm = copy_vals(imm, data[0:7], 11, -1)
-            imm = copy_vals(imm, data[20:25], 4, -1)
+            # imm = copy_vals(imm, data[0:7], 11, -1)
+            # imm = copy_vals(imm, data[20:25], 4, -1)
+            imm = (instr & int("F80", 16)) >> 7  # Bit [4:0]
+            imm += (instr & int("FE000000", 16)) >> 20  # Bit [11:5]
         elif op == 99:              # SB Format.
             formats = 'SB'
-            imm = copy_vals(imm, data[20:24], 1, 1)
-            imm[11], imm[12] = data[24], data[0]
-            imm = copy_vals(imm, data[1:7], 10, -1)
+            # imm = copy_vals(imm, data[20:24], 1, 1)
+            # imm[11], imm[12] = data[24], data[0]
+            # imm = copy_vals(imm, data[1:7], 10, -1)
+            imm = (instr & int("F00", 16)) >> 7  # Bit [4:1]
+            imm += (instr & int("7E000000", 16)) >> 20  # Bit [10:5]
+            imm += (instr & int("80", 16)) << 4  # Bit [11]
+            imm += (instr & int("80000000", 16)) >> 19  # Bit [12]
         elif op == 23 or op == 55:   # U Format.
             formats = 'U'
-            imm = copy_vals(imm, data[0:20], 12, 1)
+            # imm = copy_vals(imm, data[0:20], 12, 1)
+            imm = (instr & int("FFFFF000", 16)) >> 12  # Bit [31:12]
         elif op == 111:              # UJ Format.
             formats = 'UJ'
-            imm[20], imm[11] = int(data[0]), int(data[11])
-            imm = copy_vals(imm, data[1:11], 1, 1)
-            imm = copy_vals(imm, data[12:20], 12, 1)
+            # imm[20], imm[11] = int(data[0]), int(data[11])
+            # imm = copy_vals(imm, data[1:11], 1, 1)
+            # imm = copy_vals(imm, data[12:20], 12, 1)
+            imm = (instr & int("7FE00000", 16)) >> 20  # Bit [10:1]
+            imm += (instr & int("100000", 16)) >> 9  # Bit [11]
+            imm += (instr & int("FF000", 16))  # Bit [19:12]
+            imm += (instr & int("80000000", 16)) >> 11  # Bit [20]
 
         # Splitting up the instruction into its parts for these instruction formats.
         if formats == 'R' or formats == 'I' or formats == 'U' or formats == 'UJ':
@@ -200,6 +223,169 @@ class YB_60:
 
         # Returning the instruction split into its different components.
         return opcode, rd, funct3, rs1, rs2, funct7, imm, formats
+
+
+    def step_thru(self, strInput):
+        split = strInput.split('s')
+        self.pc = int(split[0], 16)
+        self.registers = np.zeros(32, dtype=int)
+        instruction = '0'
+
+        while format(int(instruction, 2), 'x') != '100073':
+
+            user_input = '0'
+
+            # Grabbing the next instruction from memory.
+            instruction = (format(int(self.memory[self.pc + 3]), "08b") + format(int(self.memory[self.pc + 2]), "08b") +
+                           format(int(self.memory[self.pc + 1]), "08b") + format(int(self.memory[self.pc]), "08b"))
+
+            while user_input != 's' and format(int(instruction, 2), 'x') != '100073':
+                user_input = str(input('(s, i, q):> '))
+                if user_input == 'i':
+                    self.display_info()
+                elif user_input == 'q':
+                    return
+
+            # Printing out the termination statement if the instruction is the terminator.
+            if format(int(instruction, 2), 'x') == '100073':
+                print('ebreak')
+                continue
+
+            # Parsing the instruction and determining the instructions name.
+            opcode, rd, funct3, rs1, rs2, funct7, imm, instr_format = self.parse_instruction(instruction)
+            name = lookup_instruction(opcode, funct3, funct7, imm)
+
+            # Printing out the instruction and all the following values.
+            print_instruction(opcode, name, str(int(rd, 2)), str(int(rs1, 2)), str(int(rs2, 2)), imm, instr_format, int(instruction, 2))
+            self.run_line(name, sign_imm(imm, instr_format), rd, rs1, rs2)
+            self.pc += 4
+
+
+
+    def run_line(self, name, imm, rd, rs1, rs2):
+        urd, urs1, urs2 = BitArray(bin=rd).uint, BitArray(bin=rs1).uint, BitArray(bin=rs2).uint
+        rd, rs1, rs2 = int(rd, 2), int(rs1, 2), int(rs2, 2)
+        imm = int(imm)
+
+        match name:
+            case 'add':
+                self.registers[rd] = self.registers[rs1] + self.registers[rs2]
+            case 'addi':
+                self.registers[rd] = self.registers[rs1] + imm
+            case 'sub':
+                self.registers[rd] = self.registers[rs1] - self.registers[rs2]
+            case 'mul':
+                self.registers[rd] = self.registers[rs1] * self.registers[rs2]
+            case 'mulh':
+                self.registers[rd] = (self.registers[rs1] * self.registers[rs2]) & 0xFFFFFFFFFFFFFFFF0000000000000000
+            case 'mulhsu' | 'mulhu':
+                self.registers[rd] = ((self.registers[rs1] & 0xFFFFFFFF) * (self.registers[rs2] & 0xFFFFFFFF)) & 0xFFFFFFFFFFFFFFFF0000000000000000
+            case 'div':
+                self.registers[rd] = self.registers[rs1] / self.registers[rs2]
+            case 'divu':
+                self.registers[rd] = (self.registers[rs1] & 0xFFFFFFFF) / (self.registers[rs2] & 0xFFFFFFFF)
+            case 'rem':
+                self.registers[rd] = self.registers[rs1] % self.registers[rs2]
+            case 'remu':
+                self.registers[rd] = (self.registers[rs1] & 0xFFFFFFFF) % (self.registers[rs2] & 0xFFFFFFFF)
+            case 'and':
+                self.registers[rd] = self.registers[rs1] & self.registers[rs2]
+            case 'andi':
+                self.registers[rd] = self.registers[rs1] & imm
+            case 'or':
+                self.registers[rd] = self.registers[rs1] | self.registers[rs2]
+            case 'ori':
+                self.registers[rd] = self.registers[rs1] | imm
+            case 'xor':
+                self.registers[rd] = self.registers[rs1] ^ self.registers[rs2]
+            case 'xori':
+                reg = self.registers[rs1]
+                self.registers[rd] = reg ^ imm
+            case 'beq':
+                if self.registers[rs1] == self.registers[rs2]:
+                    self.pc += imm >> 1
+            case 'bge':
+                if self.registers[rs1] >= self.registers[rs2]:
+                    self.pc += imm >> 1
+            case 'bgeu':
+                if (self.registers[rs1] & 0xFFFFFFFF) >= (self.registers[rs2] & 0xFFFFFFFF):
+                    self.pc += imm >> 1
+            case 'blt':
+                if self.registers[rs1] < self.registers[rs2]:
+                    self.pc += imm >> 1
+            case 'bltu':
+                if (self.registers[rs1] & 0xFFFFFFFF) < (self.registers[rs2] & 0xFFFFFFFF):
+                    self.pc += imm >> 1
+            case 'bne':
+                if self.registers[rs1] != self.registers[rs2]:
+                    self.pc += imm >> 1
+            case 'jal':
+                self.registers[rd] = self.pc + 4
+                self.pc = self.pc + imm >> 1
+            case 'jalr':
+                self.registers[rd] = self.pc + 4
+                self.pc = self.registers[rs1] + imm
+            case 'lb':
+                self.registers[rd] = self.memory[int(self.registers[rs1] + imm)]
+            case 'lbu':
+                loc = int(self.registers[rs1] + imm)
+                self.registers[rd] = self.memory[loc] & 0xFFFFFFFF
+            case 'lh':
+                loc = int(self.registers[rs1] + imm)
+                self.registers[rd] = (self.memory[loc + 1] << 8) + self.memory[loc]
+            case 'lhu':
+                loc = int(self.registers[rs1] + imm)
+                self.registers[rd] = (self.memory[loc + 1] << 8) + self.memory[loc] & 0xFFFFFFFF
+            case 'lw':
+                loc = int(self.registers[rs1] + imm)
+                self.registers[rd] = (self.memory[loc + 3] << 24) + (self.memory[loc + 2] << 16) + (self.memory[loc + 1] << 8) + self.memory[loc]
+            case 'slli':
+                val = imm
+                self.registers[rd] = (self.registers[rs1] << val)
+            case 'sll':
+                self.registers[rd] = (self.registers[rs1] << self.registers[rs2])
+            case 'srli':
+                self.registers[rd] = (self.registers[rs1] >> (imm & 0x1F))
+            case 'srai':
+                if self.registers[rs1] >= 0:
+                    self.registers[rd] = (self.registers[rs1] >> (imm & 0x1F))
+                else:
+                    self.registers[rd] = (self.registers[rs1] >> (imm & 0x1F)) | (-(self.registers[rs1]) >> (imm & 0x1F))
+            case 'srl':
+                self.registers[rd] = (self.registers[rs1] >> self.registers[rs2])
+            case 'sra':
+                if self.registers[rs1] >= 0:
+                    self.registers[rd] = (self.registers[rs1] >> self.registers[rs2])
+                else:
+                    self.registers[rd] = (self.registers[rs1] >> self.registers[rs2]) | (-(self.registers[rs1]) >> self.registers[rs2])
+            case 'slt':
+                self.registers[rd] = 1 if self.registers[rs1] < self.registers[rs2] else 0
+            case 'slti':
+                self.registers[rd] = 1 if self.registers[rs1] < imm else 0
+            case 'sltiu':
+                num1 = self.registers[rs1] & 0xFFFFFFFF
+                num2 = imm & 0xFFFFFFFF
+                self.registers[rd] = 1 if num1 < num2 else 0
+            case 'auipc':
+                self.registers[rd] = self.pc + (imm << 12)
+            case 'lui':
+                self.registers[rd] = imm << 12
+            case 'sb':
+                self.memory[self.registers[rs1] + imm] = (self.registers[rs2] & 0xFF)
+            case 'sh':
+                val = (self.registers[rs2] & 0xFFFF)
+                self.memory[self.registers[rs1] + imm + 1] = int(val & 0xFF00)
+                self.memory[self.registers[rs1] + imm] = int(val & 0x00FF)
+            case 'sw':
+                val = (self.registers[rs2] & 0xFFFFFFFF)
+                self.memory[self.registers[rs1] + imm + 3] = int(val & 0xFF000000)
+                self.memory[self.registers[rs1] + imm + 2] = int(val & 0xFF0000)
+                self.memory[self.registers[rs1] + imm + 1] = int(val & 0xFF00)
+                self.memory[self.registers[rs1] + imm ] = int(val & 0x00FF)
+        self.registers[0] = 0
+        if self.registers[rd] >= 0:
+            self.registers[rd] &= 0xFFFFFFFF
+
 
 
 # Copies data into imm starting at j and incrementing.
@@ -218,16 +404,18 @@ def lookup_instruction(op, fun3, fun7, imm):
         funct7 = format(int(fun7, 2), 'x')
     finally:
         instr = [['add', 'sll', 'slt', 'sltu', 'xor', 'srl', 'or', 'and'], ['addi', 'slli', 'slti', 'sltiu', 'xori', 'srli', 'ori', 'andi'],
-                 ['ecall', 'csrrw', 'csrrs', 'csrrc', 'csrrwi', 'csrrsi', 'csrrci'], ['lb', 'lh', 'lw', 'lbu', 'lhu'], ['fence', 'fence.i'],
-                 ['beq', 'bne', '', '', 'blt', 'bge', 'bltu', 'bgeu'], ['sb', 'sh', 'sw']]
-        r_instr, i_instr1, i_instr2, i_instr3, i_instr4, sb_instr, s_instr = 0, 1, 2, 3, 4, 5, 6
+                 ['ecall', 'csrrw', 'csrrs', 'csrrc', 'csrrwi', 'csrrsi', 'csrrci'], ['lb', 'lh', 'lw', '', 'lbu', 'lhu'], ['fence', 'fence.i'],
+                 ['beq', 'bne', '', '', 'blt', 'bge', 'bltu', 'bgeu'], ['sb', 'sh', 'sw'], ['mul', 'mulh', 'mulhsu', 'mulhu', 'div', 'divu', 'rem', 'remu']]
+        r_instr, i_instr1, i_instr2, i_instr3, i_instr4, sb_instr, s_instr, r_instr2 = 0, 1, 2, 3, 4, 5, 6, 7
 
         # Looking up what instruction it is.
         match opcode:
             case '33':
+                if funct7 == '1':
+                    return instr[r_instr2][funct3]
                 return ('sub' if format(funct3, 'x') == '0' else 'sra' if format(funct3, 'x') == '5' else '') if funct7 == '20' else instr[r_instr][funct3]
             case '13':
-                if funct3 == '5' and format(int(imm[5:11], 2), 'x') == '20':
+                if funct3 == 5 and format(imm >> 5, 'x') == '20':
                     return 'srai'
                 return instr[i_instr1][funct3]
             case '73':
@@ -240,31 +428,59 @@ def lookup_instruction(op, fun3, fun7, imm):
                 return instr[sb_instr][funct3]
             case '23':
                 return instr[s_instr][funct3]
+
         # Returning the special cases, or an error if the instruction given is not supported.
         return 'jalr' if opcode == '67' else 'jal' if opcode == '6f' else 'lui' if opcode == '37' else 'auipc' if opcode == '17' else 'Instruction Not Supported'
 
 
 # Printing out the RISC-V instruction that we disassembled.
-def print_instruction(opcode, name, rd, rs1, rs2, imm, instr_format):
+def print_instruction(opcode, name, rd, rs1, rs2, imm, instr_format, instr):
     if name != 'Instruction Not Supported':
         print(format(name, '>6') + ' x', end="")
 
     # Printing out the instruction based on what type of instruction it is.
-    imm_str = get_immstr(instr_format, imm)
+    # imm_str = get_immstr(instr_format, imm)
     if instr_format == 'R':
         print(rd + ', x' + rs1 + ', x' + rs2)
     elif instr_format == 'I':
+        func3 = (instr & int("7000", 16)) >> 12
+        imm = sign_imm(imm, instr_format)
+        if func3 == 1 or func3 == 5:
+            imm = (instr & int("1F00000", 16)) >> 20
         if opcode == '0000011' or opcode == '1100111':
-            print(rd + ', ' + str(int(''.join([str(i) for i in imm[0:12]]), 2)) + '(x' + rs1 + ')')
+            print(rd + ', ' + str(imm) + '(x' + rs1 + ')')
         else:
-            print(rd + ', x' + rs1 + ', ' + str(int(''.join([str(i) for i in imm[0:12]]), 2)))
+            print(rd + ', x' + rs1 + ', ' + str(imm))
     elif instr_format == 'S':
-        print(rs2 + ', ' + str(BitArray(bin=imm_str).uint) + '(x' + rs1 + ')')
+        imm = sign_imm(imm, instr_format)
+        print(rs2 + ', ' + str(imm) + '(x' + rs1 + ')')
     elif instr_format == 'UJ' or instr_format == 'U':
-        print(rd + ', ' + str(BitArray(bin=imm_str).int))
+        imm = sign_imm(imm, instr_format)
+        print(rd + ', ' + str(imm))
     elif instr_format == 'SB':
-        print(rs1 + ', x' + rs2 + ', ' + str(BitArray(bin=imm_str).int))
+        imm = sign_imm(imm, instr_format)
+        print(rs1 + ', x' + rs2 + ', ' + str(imm))
     return
+
+
+def sign_imm(imm, instr_format):
+    match instr_format:
+        case 'I':
+            if imm > 2**11:
+                imm = two_compl(imm, 12)
+        case 'S':
+            if imm > 2**11:
+                imm = two_compl(imm, 12)
+        case 'U':
+            if imm > 2**31:
+                imm = two_compl(imm, 32)
+        case 'UJ':
+            if imm > 2**20:
+                imm = two_compl(imm, 21)
+        case 'SB':
+            if imm > 2**12:
+                imm = two_compl(imm, 13)
+    return imm
 
 
 def get_immstr(instr_format, imm):
@@ -282,18 +498,23 @@ def get_immstr(instr_format, imm):
     return imm_str
 
 
+# Define 2's complement
+def two_compl(number, bits):
+    return ~((2 ** bits - 1) ^ number)
+
+
 if __name__ == '__main__':
 
     YB = YB_60()
     if len(sys.argv) == 2:
         YB.read_in_file(open(sys.argv[1]))
 
-    strInput = str(input('>'))
+    strInput = str(input('> '))
     while strInput != 'exit' and strInput != '\04':
 
         # Determining what to do with the users input.
         try:
-            if strInput.isalnum() and not ('r' in strInput) and not ('t' in strInput) and not ('info' == strInput):
+            if strInput.isalnum() and not ('r' in strInput) and not ('t' in strInput) and not ('info' == strInput) and not ('s' in strInput):
                 YB.display_mem_address(int(strInput, 16))
             elif '.' in strInput:
                 YB.display_range_mem_address(strInput)
@@ -303,6 +524,8 @@ if __name__ == '__main__':
                 YB.run_program(strInput)
             elif 't' in strInput:
                 YB.disassemble(strInput)
+            elif 's' in strInput:
+                YB.step_thru(strInput)
             elif 'info' == strInput:
                 YB.display_info()
             else:
@@ -310,6 +533,6 @@ if __name__ == '__main__':
         except ValueError:
             print('Error: Address provided is not a hexadecimal number.')
         except Exception:
-            pass
+            print('Problem Encountered.')
 
-        strInput = str(input('>'))
+        strInput = str(input('> '))
