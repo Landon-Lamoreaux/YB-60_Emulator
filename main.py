@@ -2,6 +2,7 @@ import numpy as np
 import sys
 import re
 from bitstring import BitArray
+import ctypes
 
 
 class YB_60:
@@ -117,7 +118,7 @@ class YB_60:
             name = lookup_instruction(opcode, funct3, funct7, imm)
 
             # Running the instruction.
-            self.run_line(name, imm, rd, rs1, rs2)
+            branch_taken = self.run_line(name, sign_imm(imm, instr_format), rd, rs1, rs2)
 
             # Printing out the name then the rd value if there is a rd in the instruction.
             print(format(name.upper(), '>7') + (format(str(rd), '>6') if rd != '0' else '      '), end='')
@@ -127,7 +128,8 @@ class YB_60:
 
             # Printing out the rs2 and or immediate register.
             print((' ' + format(str(rs2), '<5') if rs2 != '0' else '') + ' ' + format(imm, 'b').zfill(5))
-            self.pc += 4  # Updating the program counter.
+            if instr_format != 'SB' or not branch_taken:
+                self.pc += 4  # Updating the program counter.
         return
 
     def display_info(self):
@@ -138,15 +140,15 @@ class YB_60:
 
     def disassemble(self, data):
         split = data.split('t')
-        pc = int(split[0], 16)  # Setting the program counter
+        self.pc = int(split[0], 16)  # Setting the program counter
         self.registers = np.zeros(32, dtype=int)
         instruction = '0'
 
         while format(int(instruction, 2), 'x') != '100073':
 
             # Grabbing the next instruction from memory.
-            instruction = (format(int(self.memory[pc + 3]), "08b") + format(int(self.memory[pc + 2]), "08b") +
-                           format(int(self.memory[pc + 1]), "08b") + format(int(self.memory[pc]), "08b"))
+            instruction = (format(int(self.memory[self.pc + 3]), "08b") + format(int(self.memory[self.pc + 2]), "08b") +
+                           format(int(self.memory[self.pc + 1]), "08b") + format(int(self.memory[self.pc]), "08b"))
 
             # Printing out the termination statement if the instruction is the terminator.
             if format(int(instruction, 2), 'x') == '100073':
@@ -160,10 +162,7 @@ class YB_60:
             # Printing out the instruction and all the following values.
             print_instruction(opcode, name, str(int(rd, 2)), str(int(rs1, 2)), str(int(rs2, 2)), imm, instr_format, int(instruction, 2))
 
-            # Running the instruction.
-            self.run_line(name, sign_imm(imm, instr_format), rd, rs1, rs2)
-
-            pc += 4
+            self.pc += 4  # Updating the program counter.
         return
 
 
@@ -257,9 +256,10 @@ class YB_60:
 
             # Printing out the instruction and all the following values.
             print_instruction(opcode, name, str(int(rd, 2)), str(int(rs1, 2)), str(int(rs2, 2)), imm, instr_format, int(instruction, 2))
-            self.run_line(name, sign_imm(imm, instr_format), rd, rs1, rs2)
-            self.pc += 4
+            branch_taken = self.run_line(name, sign_imm(imm, instr_format), rd, rs1, rs2)
 
+            if instr_format != 'SB' or not branch_taken:
+                self.pc += 4  # Updating the program counter.
 
 
     def run_line(self, name, imm, rd, rs1, rs2):
@@ -275,15 +275,17 @@ class YB_60:
             case 'sub':
                 self.registers[rd] = self.registers[rs1] - self.registers[rs2]
             case 'mul':
-                self.registers[rd] = self.registers[rs1] * self.registers[rs2]
+                self.registers[rd] = np.int32(self.registers[rs1] * self.registers[rs2])
             case 'mulh':
-                self.registers[rd] = (self.registers[rs1] * self.registers[rs2]) & 0xFFFFFFFFFFFFFFFF0000000000000000
-            case 'mulhsu' | 'mulhu':
-                self.registers[rd] = ((self.registers[rs1] & 0xFFFFFFFF) * (self.registers[rs2] & 0xFFFFFFFF)) & 0xFFFFFFFFFFFFFFFF0000000000000000
+                self.registers[rd] = int(self.registers[rs1]) * int(self.registers[rs2]) >> 32
+            case 'mulhu':
+                self.registers[rd] = ((self.registers[rs1] & 0xFFFFFFFF) * (self.registers[rs2] & 0xFFFFFFFF)) >> 32
+            case 'mulhsu':
+                self.registers[rd] = (int(self.registers[rs1]) * (self.registers[rs2] & 0xFFFFFFFF)) >> 32
             case 'div':
-                self.registers[rd] = self.registers[rs1] / self.registers[rs2]
+                self.registers[rd] = self.registers[rs1] // self.registers[rs2]
             case 'divu':
-                self.registers[rd] = (self.registers[rs1] & 0xFFFFFFFF) / (self.registers[rs2] & 0xFFFFFFFF)
+                self.registers[rd] = (self.registers[rs1] & 0xFFFFFFFF) // (self.registers[rs2] & 0xFFFFFFFF)
             case 'rem':
                 self.registers[rd] = self.registers[rs1] % self.registers[rs2]
             case 'remu':
@@ -303,63 +305,75 @@ class YB_60:
                 self.registers[rd] = reg ^ imm
             case 'beq':
                 if self.registers[rs1] == self.registers[rs2]:
-                    self.pc += imm >> 1
+                    self.pc += (imm & -2)
+                else:
+                    return False
             case 'bge':
                 if self.registers[rs1] >= self.registers[rs2]:
-                    self.pc += imm >> 1
+                    self.pc += (imm & -2)
+                else:
+                    return False
             case 'bgeu':
                 if (self.registers[rs1] & 0xFFFFFFFF) >= (self.registers[rs2] & 0xFFFFFFFF):
-                    self.pc += imm >> 1
+                    self.pc += (imm & -2)
+                else:
+                    return False
             case 'blt':
                 if self.registers[rs1] < self.registers[rs2]:
-                    self.pc += imm >> 1
+                    self.pc += (imm & -2)
+                else:
+                    return False
             case 'bltu':
                 if (self.registers[rs1] & 0xFFFFFFFF) < (self.registers[rs2] & 0xFFFFFFFF):
-                    self.pc += imm >> 1
+                    self.pc += (imm & -2)
+                else:
+                    return False
             case 'bne':
                 if self.registers[rs1] != self.registers[rs2]:
-                    self.pc += imm >> 1
+                    self.pc += (imm & -2)
+                else:
+                    return False
             case 'jal':
                 self.registers[rd] = self.pc + 4
-                self.pc = self.pc + imm >> 1
+                self.pc = self.pc + (imm & -2) - 4
             case 'jalr':
                 self.registers[rd] = self.pc + 4
-                self.pc = self.registers[rs1] + imm
+                self.pc = self.registers[rs1] + imm - 4
             case 'lb':
-                self.registers[rd] = self.memory[int(self.registers[rs1] + imm)]
+                value = self.memory[int(self.registers[rs1] + imm)]
+                if value & 0x80 == 128:
+                    value = value | 0xFFFFFF00
+                self.registers[rd] = np.int32(value)
             case 'lbu':
-                loc = int(self.registers[rs1] + imm)
-                self.registers[rd] = self.memory[loc] & 0xFFFFFFFF
+                self.registers[rd] = self.memory[int(self.registers[rs1] + imm)]
             case 'lh':
                 loc = int(self.registers[rs1] + imm)
-                self.registers[rd] = (self.memory[loc + 1] << 8) + self.memory[loc]
+                value = (self.memory[loc + 1] << 8) + self.memory[loc]
+                if value & 0x8000 == 32768:
+                    value = value | 0xFFFF0000
+                self.registers[rd] = np.int32(value)
             case 'lhu':
                 loc = int(self.registers[rs1] + imm)
-                self.registers[rd] = (self.memory[loc + 1] << 8) + self.memory[loc] & 0xFFFFFFFF
+                self.registers[rd] = (self.memory[loc + 1] << 8) + self.memory[loc]
             case 'lw':
                 loc = int(self.registers[rs1] + imm)
-                self.registers[rd] = (self.memory[loc + 3] << 24) + (self.memory[loc + 2] << 16) + (self.memory[loc + 1] << 8) + self.memory[loc]
+                self.registers[rd] = ((self.memory[loc + 3] << 24) + (self.memory[loc + 2] << 16) + (self.memory[loc + 1] << 8) + self.memory[loc])
             case 'slli':
-                val = imm
-                self.registers[rd] = (self.registers[rs1] << val)
+                self.registers[rd] = (self.registers[rs1] << imm)
             case 'sll':
                 self.registers[rd] = (self.registers[rs1] << self.registers[rs2])
             case 'srli':
-                self.registers[rd] = (self.registers[rs1] >> (imm & 0x1F))
+                self.registers[rd] = ((self.registers[rs1] & 0xFFFFFFFF) >> (imm & 0x1F))
             case 'srai':
-                if self.registers[rs1] >= 0:
-                    self.registers[rd] = (self.registers[rs1] >> (imm & 0x1F))
-                else:
-                    self.registers[rd] = (self.registers[rs1] >> (imm & 0x1F)) | (-(self.registers[rs1]) >> (imm & 0x1F))
+                self.registers[rd] = (self.registers[rs1] >> (imm & 0x1F))
             case 'srl':
-                self.registers[rd] = (self.registers[rs1] >> self.registers[rs2])
+                self.registers[rd] = ((self.registers[rs1] & 0xFFFFFFFF) >> self.registers[rs2])
             case 'sra':
-                if self.registers[rs1] >= 0:
-                    self.registers[rd] = (self.registers[rs1] >> self.registers[rs2])
-                else:
-                    self.registers[rd] = (self.registers[rs1] >> self.registers[rs2]) | (-(self.registers[rs1]) >> self.registers[rs2])
+                self.registers[rd] = (self.registers[rs1] >> self.registers[rs2])
             case 'slt':
                 self.registers[rd] = 1 if self.registers[rs1] < self.registers[rs2] else 0
+            case 'sltu':
+                self.registers[rd] = 1 if (self.registers[rs1] & 0xFFFFFFFF) < (self.registers[rs2] & 0xFFFFFFFF) else 0
             case 'slti':
                 self.registers[rd] = 1 if self.registers[rs1] < imm else 0
             case 'sltiu':
@@ -369,22 +383,21 @@ class YB_60:
             case 'auipc':
                 self.registers[rd] = self.pc + (imm << 12)
             case 'lui':
-                self.registers[rd] = imm << 12
+                self.registers[rd] = (imm << 12)
             case 'sb':
                 self.memory[self.registers[rs1] + imm] = (self.registers[rs2] & 0xFF)
             case 'sh':
                 val = (self.registers[rs2] & 0xFFFF)
-                self.memory[self.registers[rs1] + imm + 1] = int(val & 0xFF00)
-                self.memory[self.registers[rs1] + imm] = int(val & 0x00FF)
+                self.memory[self.registers[rs1] + imm + 1] = int(val & 0xFF00) >> 8
+                self.memory[self.registers[rs1] + imm] = int(val & 0xFF)
             case 'sw':
                 val = (self.registers[rs2] & 0xFFFFFFFF)
-                self.memory[self.registers[rs1] + imm + 3] = int(val & 0xFF000000)
-                self.memory[self.registers[rs1] + imm + 2] = int(val & 0xFF0000)
-                self.memory[self.registers[rs1] + imm + 1] = int(val & 0xFF00)
-                self.memory[self.registers[rs1] + imm ] = int(val & 0x00FF)
+                self.memory[self.registers[rs1] + imm + 3] = int(val & 0xFF000000) >> 24
+                self.memory[self.registers[rs1] + imm + 2] = int(val & 0xFF0000) >> 16
+                self.memory[self.registers[rs1] + imm + 1] = int(val & 0xFF00) >> 8
+                self.memory[self.registers[rs1] + imm] = int(val & 0xFF)
         self.registers[0] = 0
-        if self.registers[rd] >= 0:
-            self.registers[rd] &= 0xFFFFFFFF
+        return True
 
 
 
@@ -445,8 +458,6 @@ def print_instruction(opcode, name, rd, rs1, rs2, imm, instr_format, instr):
     elif instr_format == 'I':
         func3 = (instr & int("7000", 16)) >> 12
         imm = sign_imm(imm, instr_format)
-        if func3 == 1 or func3 == 5:
-            imm = (instr & int("1F00000", 16)) >> 20
         if opcode == '0000011' or opcode == '1100111':
             print(rd + ', ' + str(imm) + '(x' + rs1 + ')')
         else:
