@@ -2,8 +2,6 @@ import numpy as np
 import sys
 import re
 from bitstring import BitArray
-import ctypes
-
 
 class YB_60:
     memory = []
@@ -141,7 +139,7 @@ class YB_60:
     def disassemble(self, data):
         split = data.split('t')
         self.pc = int(split[0], 16)  # Setting the program counter
-        self.registers = np.zeros(32, dtype=int)
+        # self.registers = np.zeros(32, dtype=int)
         instruction = '0'
 
         while format(int(instruction, 2), 'x') != '100073':
@@ -263,7 +261,6 @@ class YB_60:
 
 
     def run_line(self, name, imm, rd, rs1, rs2):
-        urd, urs1, urs2 = BitArray(bin=rd).uint, BitArray(bin=rs1).uint, BitArray(bin=rs2).uint
         rd, rs1, rs2 = int(rd, 2), int(rs1, 2), int(rs2, 2)
         imm = int(imm)
 
@@ -279,9 +276,9 @@ class YB_60:
             case 'mulh':
                 self.registers[rd] = int(self.registers[rs1]) * int(self.registers[rs2]) >> 32
             case 'mulhu':
-                self.registers[rd] = ((self.registers[rs1] & 0xFFFFFFFF) * (self.registers[rs2] & 0xFFFFFFFF)) >> 32
+                self.registers[rd] = (int(self.registers[rs1] & 0xFFFFFFFF) * int(self.registers[rs2] & 0xFFFFFFFF)) >> 32
             case 'mulhsu':
-                self.registers[rd] = (int(self.registers[rs1]) * (self.registers[rs2] & 0xFFFFFFFF)) >> 32
+                self.registers[rd] = (int(self.registers[rs1]) * int(self.registers[rs2] & 0xFFFFFFFF)) >> 32
             case 'div':
                 self.registers[rd] = self.registers[rs1] // self.registers[rs2]
             case 'divu':
