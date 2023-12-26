@@ -1,3 +1,0 @@
-The program functions correctly and passed all test cases. Overall, the writeup
-should include more information about he YB-60 emulator like memory space,
-registers (number of registers and basic information about them) etc.
