@@ -136,17 +136,29 @@ class YB_60:
             print(f"{'x' + str(i) : >3}" + ' ' + format(self.registers[i] & 0xFFFFFFFF, 'x').upper().zfill(8))
         return
 
-    def disassemble(self, data):
-        split = data.split('t')
-        self.pc = int(split[0], 16)  # Setting the program counter
-        # self.registers = np.zeros(32, dtype=int)
+    def disassemble(self, data, split_char):
+        split = data.split(split_char)
+        self.pc = int(split[0], 16)  # Setting the program counter.
+        self.registers = np.zeros(32, dtype=int)  # Clearing the registers.
         instruction = '0'
+        branch_taken = False
 
         while format(int(instruction, 2), 'x') != '100073':
+
+            user_input = '0'
 
             # Grabbing the next instruction from memory.
             instruction = (format(int(self.memory[self.pc + 3]), "08b") + format(int(self.memory[self.pc + 2]), "08b") +
                            format(int(self.memory[self.pc + 1]), "08b") + format(int(self.memory[self.pc]), "08b"))
+
+            # If we're in step-thru mode, then we check what the user wants to do after running each line.
+            if split_char == 's':
+                while user_input != 's' and format(int(instruction, 2), 'x') != '100073':
+                    user_input = str(input('(s, i, q):> '))
+                    if user_input == 'i':
+                        self.display_info()
+                    elif user_input == 'q':
+                        return
 
             # Printing out the termination statement if the instruction is the terminator.
             if format(int(instruction, 2), 'x') == '100073':
@@ -160,7 +172,12 @@ class YB_60:
             # Printing out the instruction and all the following values.
             print_instruction(opcode, name, str(int(rd, 2)), str(int(rs1, 2)), str(int(rs2, 2)), imm, instr_format, int(instruction, 2))
 
-            self.pc += 4  # Updating the program counter.
+            # If we're in step-thru mode, then run the line we are on.
+            if split_char == 's':
+                branch_taken = self.run_line(name, sign_imm(imm, instr_format), rd, rs1, rs2)
+
+            if instr_format != 'SB' or not branch_taken or split_char == 't':
+                self.pc += 4  # Updating the program counter.
         return
 
 
@@ -220,44 +237,6 @@ class YB_60:
 
         # Returning the instruction split into its different components.
         return opcode, rd, funct3, rs1, rs2, funct7, imm, formats
-
-
-    def step_thru(self, strInput):
-        split = strInput.split('s')
-        self.pc = int(split[0], 16)
-        self.registers = np.zeros(32, dtype=int)
-        instruction = '0'
-
-        while format(int(instruction, 2), 'x') != '100073':
-
-            user_input = '0'
-
-            # Grabbing the next instruction from memory.
-            instruction = (format(int(self.memory[self.pc + 3]), "08b") + format(int(self.memory[self.pc + 2]), "08b") +
-                           format(int(self.memory[self.pc + 1]), "08b") + format(int(self.memory[self.pc]), "08b"))
-
-            while user_input != 's' and format(int(instruction, 2), 'x') != '100073':
-                user_input = str(input('(s, i, q):> '))
-                if user_input == 'i':
-                    self.display_info()
-                elif user_input == 'q':
-                    return
-
-            # Printing out the termination statement if the instruction is the terminator.
-            if format(int(instruction, 2), 'x') == '100073':
-                print('ebreak')
-                continue
-
-            # Parsing the instruction and determining the instructions name.
-            opcode, rd, funct3, rs1, rs2, funct7, imm, instr_format = self.parse_instruction(instruction)
-            name = lookup_instruction(opcode, funct3, funct7, imm)
-
-            # Printing out the instruction and all the following values.
-            print_instruction(opcode, name, str(int(rd, 2)), str(int(rs1, 2)), str(int(rs2, 2)), imm, instr_format, int(instruction, 2))
-            branch_taken = self.run_line(name, sign_imm(imm, instr_format), rd, rs1, rs2)
-
-            if instr_format != 'SB' or not branch_taken:
-                self.pc += 4  # Updating the program counter.
 
 
     def run_line(self, name, imm, rd, rs1, rs2):
@@ -531,9 +510,9 @@ if __name__ == '__main__':
             elif 'r' in strInput:
                 YB.run_program(strInput)
             elif 't' in strInput:
-                YB.disassemble(strInput)
+                YB.disassemble(strInput, 't')
             elif 's' in strInput:
-                YB.step_thru(strInput)
+                YB.disassemble(strInput, 's')
             elif 'info' == strInput:
                 YB.display_info()
             else:
